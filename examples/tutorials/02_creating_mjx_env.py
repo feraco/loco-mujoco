@@ -27,7 +27,7 @@ rng_sample_uni_action = jax.jit(jax.vmap(env.sample_action_space))
 state = rng_reset(env_keys)
 
 step = 0
-previous_time = time.time()
+previous_time = time.time()c
 LOGGING_FREQUENCY = 100000
 i = 0
 while i < 100000:
