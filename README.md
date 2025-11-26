@@ -13,6 +13,11 @@
 > A **major release (v1.0)** just dropped! 🎉  
 > LocoMuJoCo now supports MJX and comes with new Jax algorithms. We also added many new environments and +22k datasets! 🚀   
 
+> 🎓 **RoboUniversity Edition:**
+> This fork includes enhanced teaching visualizations and tools for learning Unitree G1 programming with MuJoCo.
+> Perfect for educational use and understanding humanoid robot locomotion!
+
+## About This Project
 
 **LocoMuJoCo** is an **imitation learning benchmark** specifically designed for **whole-body control**.  
 It features a diverse set of environments, including **quadrupeds**, **humanoids**, and **(musculo-)skeletal human models**,
@@ -20,6 +25,18 @@ each provided with comprehensive datasets (over 22,000 samples per humanoid).
 
 Although primarily focused on imitation learning, LocoMuJoCo also supports custom reward function classes,  
 making it suitable for pure reinforcement learning as well.
+
+### RoboUniversity: Learning Unitree G1 Programming
+
+This repository is used at **RoboUniversity** to teach students how to program the **Unitree G1 humanoid robot** using MuJoCo simulation. Students learn to:
+
+- 🤖 **Understand robot kinematics**: Visualize joint movements and body dynamics in real-time
+- 🎭 **Explore motion capture data**: Learn from retargeted human motion datasets (LAFAN1, AMASS)
+- 📊 **Analyze robot behavior**: Use interactive visualizations with Rerun and web interfaces
+- 🧪 **Develop control algorithms**: Test locomotion strategies in a safe simulation environment
+- 🎯 **Master imitation learning**: Train robots to replicate complex human movements
+
+The included teaching tools provide professional visualizations perfect for classroom demonstrations and research presentations.
 
 <div align="center">
   <img src="imgs/main_lmj.gif"/>
@@ -42,73 +59,257 @@ making it suitable for pure reinforcement learning as well.
 
 ## Installation
 
-[//]: # (You have the choice to install the latest release via PyPI by running )
+### Prerequisites
 
-[//]: # ()
-[//]: # ()
-[//]: # (```bash)
+Before installing LocoMuJoCo, ensure you have:
+- **Python 3.8+** (Python 3.10 or 3.11 recommended)
+- **pip** package manager
+- **Git** for cloning the repository
 
-[//]: # ()
-[//]: # (pip install loco-mujoco )
+### Platform-Specific Requirements
 
-[//]: # ()
-[//]: # (```)
-
-Clone this repo and do an editable installation:
-
+#### macOS (Apple Silicon M1/M2/M3)
 ```bash
-cd loco-mujoco
-pip install -e . 
+# Install Conda (if not already installed)
+brew install --cask miniconda
+
+# Create a Python environment
+conda create -n loco-mujoco python=3.11
+conda activate loco-mujoco
+
+# Install required system dependencies
+conda install -c conda-forge pinocchio
 ```
 
-By default, both will install the CPU-version of Jax. If you want to use Jax on the GPU, you need to install the following:
+#### macOS (Intel)
+```bash
+# Create a Python environment
+python3 -m venv loco-mujoco-env
+source loco-mujoco-env/bin/activate
+
+# You may need to install additional build tools
+xcode-select --install
+```
+
+#### Linux (Ubuntu/Debian)
+```bash
+# Install system dependencies
+sudo apt-get update
+sudo apt-get install python3-dev python3-pip git build-essential
+
+# Create a Python environment
+python3 -m venv loco-mujoco-env
+source loco-mujoco-env/bin/activate
+
+# For Pinocchio support (optional, for advanced visualization)
+sudo apt-get install robotpkg-py311-pinocchio
+```
+
+#### Windows
+```bash
+# Install via Anaconda (recommended for Windows)
+conda create -n loco-mujoco python=3.11
+conda activate loco-mujoco
+
+# Install Visual Studio Build Tools if needed
+# Download from: https://visualstudio.microsoft.com/downloads/
+```
+
+### Core Installation
+
+Once prerequisites are met, install LocoMuJoCo:
 
 ```bash
-pip install jax["cuda12"]
-````
+# Clone the repository
+git clone https://github.com/feraco/loco-mujoco.git
+cd loco-mujoco
+
+# Install in editable mode
+pip install -e .
+```
+
+### GPU Support (Optional but Recommended)
+
+For GPU-accelerated training with JAX:
+
+```bash
+# CUDA 12.x (NVIDIA GPUs)
+pip install "jax[cuda12]"
+
+# CUDA 11.x (older NVIDIA GPUs)
+pip install "jax[cuda11]"
+```
+
+### Visualization Tools (For RoboUniversity Teaching)
+
+Install additional packages for enhanced visualizations:
+
+```bash
+# For Rerun 3D visualization with actual robot meshes
+conda install -c conda-forge pinocchio
+pip install rerun-sdk trimesh
+
+# For web-based interactive visualizations
+pip install matplotlib numpy
+
+# Verify installation
+python -c "import loco_mujoco; print('LocoMuJoCo installed successfully!')"
+```
+
+### Advanced Features
 
 > [!NOTE]
-> If you want to run the **MyoSkeleton** environment, you need to additionally run
-> `loco-mujoco-myomodel-init` to accept the license and download the model.
+> If you want to run the **MyoSkeleton** environment, you need to additionally run:
+> ```bash
+> loco-mujoco-myomodel-init
+> ```
+> This accepts the license and downloads the musculoskeletal model.
+
+### Troubleshooting
+
+**Issue: Import errors for `mujoco` or `mujoco-mjx`**
+```bash
+pip install mujoco mujoco-mjx
+```
+
+**Issue: `pinocchio` not found (macOS)**
+```bash
+conda install -c conda-forge pinocchio
+```
+
+**Issue: NumPy version conflicts**
+```bash
+pip install "numpy<2.0"  # LocoMuJoCo works best with numpy 1.x
+```
+
+**Issue: Permission denied on Linux**
+```bash
+# Add user to render group for GPU access
+sudo usermod -a -G render $USER
+# Log out and back in for changes to take effect
+```
 
 
 ### Datasets
 
 LocoMuJoCo provides three sources of motion capture (mocap) data for humanoid environments: default (provided by us), LAFAN1, and AMASS. The first two datasets
 are available on the [LocoMujoCo HuggingFace dataset repository](https://huggingface.co/datasets/robfiras/loco-mujoco-datasets)
-and will downloaded and cached automatically for you. AMASS needs to be downloaded and installed separately due to
-their licensing. See [here](loco_mujoco/smpl) for more information about the installation.
+and will be downloaded and cached automatically. AMASS needs to be downloaded and installed separately due to
+licensing requirements. See [here](loco_mujoco/smpl) for more information about AMASS installation.
 
-This is how you can visualize the datasets:
+#### Quick Dataset Example
 
 ```python
 from loco_mujoco.task_factories import ImitationFactory, LAFAN1DatasetConf, DefaultDatasetConf, AMASSDatasetConf
 
-
-# # example --> you can add as many datasets as you want in the lists!
-env = ImitationFactory.make("UnitreeH1",
-                            default_dataset_conf=DefaultDatasetConf(["squat"]),
+# Create environment with multiple datasets
+env = ImitationFactory.make("UnitreeG1",
+                            default_dataset_conf=DefaultDatasetConf(["walk", "squat"]),
                             lafan1_dataset_conf=LAFAN1DatasetConf(["dance2_subject4", "walk1_subject1"]),
-                            # if SMPL and AMASS are installed, you can use the following:
+                            # If SMPL and AMASS are installed:
                             #amass_dataset_conf=AMASSDatasetConf(["DanceDB/DanceDB/20120911_TheodorosSourmelis/Capoeira_Theodoros_v2_C3D_poses"])
                             )
 
+# Visualize the loaded trajectories
 env.play_trajectory(n_episodes=3, n_steps_per_episode=500, render=True)
 ```
 
-#### Speeding up Dataset Loading
-LocoMuJoCo only stores datasets with joint positions and velocities to save memory. All other attributes are calculated 
-using forward kinematics upon loading. If you want to speed up the dataset loading, you can define caches for the datasets. This will
-store the forward kinematics results in a cache file, which will be loaded on the next run: 
+#### RoboUniversity Teaching Visualizations
 
+For educational purposes, we provide enhanced visualization tools:
+
+**1. Complete Rerun Visualizer (3D Robot + Joint Data)**
 ```bash
-loco-mujoco-set-all-caches --path <path to cache>
+cd LAFAN1_Retargeting_Dataset
+python complete_g1_visualizer.py --file_name dance1_subject2 --robot_type g1 --playback_speed 0.01
 ```
+This shows the actual G1 robot with meshes and joint angle time series in separate panels.
 
-For instance, you could run:
+**2. Interactive Web Visualizer**
+```bash
+cd LAFAN1_Retargeting_Dataset
+python web_teaching_interface.py --file_name dance1_subject2 --robot_type g1 --output robouniversity_visualizer.html
+open robouniversity_visualizer.html
+```
+Click any joint value to see detailed time-series plots - perfect for teaching!
+
+**3. Simple Joint Analysis**
+```bash
+cd LAFAN1_Retargeting_Dataset
+python simple_rerun_visualizer.py --file_name dance1_subject2 --robot_type g1
+```
+Creates comprehensive matplotlib plots showing joint patterns and motion analysis.
+
+#### Speeding up Dataset Loading
+#### Speeding up Dataset Loading
+
+LocoMuJoCo stores datasets with only joint positions and velocities to save memory. All other attributes are calculated 
+using forward kinematics upon loading. To speed up dataset loading, you can define caches that store the forward kinematics results: 
+
 ```bash
 loco-mujoco-set-all-caches --path "$HOME/.loco-mujoco-caches"
-````
+```
+
+This significantly reduces loading time on subsequent runs, especially useful when working with large datasets like AMASS.
+
+---
+
+## Quick Start for Unitree G1 Programming
+
+Perfect for students learning humanoid robot control:
+
+### 1. Test Your Installation
+```python
+import loco_mujoco
+
+# Create a simple G1 environment
+env = loco_mujoco.LocoEnv.make("UnitreeG1")
+
+# Reset and take random actions
+obs = env.reset()
+for _ in range(1000):
+    action = env.action_space.sample()
+    obs, reward, done, info = env.step(action)
+    env.render()
+```
+
+### 2. Load and Visualize Motion Data
+```python
+from loco_mujoco.task_factories import ImitationFactory, LAFAN1DatasetConf
+
+# Load G1 with dance dataset
+env = ImitationFactory.make("UnitreeG1",
+                            lafan1_dataset_conf=LAFAN1DatasetConf(["dance1_subject2"]))
+
+# Watch the robot perform the motion
+env.play_trajectory(n_episodes=1, n_steps_per_episode=500, render=True)
+```
+
+### 3. Analyze Robot Movements
+```bash
+# Navigate to the teaching dataset folder
+cd LAFAN1_Retargeting_Dataset
+
+# Launch the complete visualizer with actual robot meshes
+python complete_g1_visualizer.py --file_name dance1_subject2 --robot_type g1 --playback_speed 0.01
+```
+
+This opens Rerun with:
+- 🤖 Full 3D G1 robot with actual meshes
+- 📊 Real-time joint angle graphs
+- 🎯 Grouped analysis (legs, arms, torso)
+- 📈 Motion analysis and velocity data
+
+### 4. Interactive Web Teaching Tool
+```bash
+# Generate interactive HTML visualization
+python web_teaching_interface.py --file_name dance1_subject2 --robot_type g1 --output my_visualization.html
+
+# Open in browser
+open my_visualization.html
+```
+
+Perfect for presentations - click any joint to see its detailed behavior over time!
 
 ---
 
