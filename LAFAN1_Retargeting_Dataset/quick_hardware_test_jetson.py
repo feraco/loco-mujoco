@@ -60,12 +60,12 @@ signal.signal(signal.SIGINT, signal_handler)
 sys.path.insert(0, '/home/unitree/unitree_sdk2_python')
 
 try:
-    from unitree_sdk2py.core.channel import ChannelFactoryInitialize
-    from unitree_sdk2py.g1.loco.g1_loco_client import LocoClient
-    from unitree_sdk2py.g1.low_level.g1_low_level_control import G1LowLevelControl
-    from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowCmd_
+    from unitree_sdk2py.core.channel import ChannelPublisher, ChannelSubscriber, ChannelFactoryInitialize
+    from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowCmd_ as hg_LowCmd, LowState_ as hg_LowState
+    from unitree_sdk2py.idl.default import unitree_hg_msg_dds__LowCmd_
     from unitree_sdk2py.utils.crc import CRC
-    from unitree_sdk2py.g1.motion_switcher.g1_motion_switcher_client import MotionSwitcherClient
+    from unitree_sdk2py.comm.motion_switcher.motion_switcher_client import MotionSwitcherClient
+    import threading
     print("✓ Unitree SDK2 Python imported successfully")
 except ImportError as e:
     print(f"✗ Failed to import SDK: {e}")
@@ -73,26 +73,44 @@ except ImportError as e:
     print("  export PYTHONPATH=/home/unitree/unitree_sdk2_python:$PYTHONPATH")
     sys.exit(1)
 
-# Per-joint gains from SDK example
-G1_KP = [
-    60, 60, 60, 100, 40, 40,    # Left leg (0-5)
-    60, 60, 60, 100, 40, 40,    # Right leg (6-11)
-    60, 40, 40,                  # Waist (12-14)
-    40, 40, 40, 40, 40, 40, 40, # Left arm (15-21)
-    40, 40, 40, 40, 40, 40, 40  # Right arm (22-28)
-]
+# DDS Topics
+kTopicLowCommand = "rt/lowcmd"
+kTopicLowState = "rt/lowstate"
 
-G1_KD = [
-    1, 1, 1, 2, 1, 1,    # Left leg
-    1, 1, 1, 2, 1, 1,    # Right leg
-    1, 1, 1,              # Waist
-    1, 1, 1, 1, 1, 1, 1, # Left arm
-    1, 1, 1, 1, 1, 1, 1  # Right arm
-]
+# Gains from xr_teleoperate - use higher gains for legs
+KP_HIGH = 300.0  # For legs
+KP_LOW = 80.0    # For arms and weak joints
+KD_HIGH = 3.0
+KD_LOW = 3.0
+
+# Per-joint gains based on G1 structure
+# Joints 0-11: Legs (high gains)
+# Joints 12-14: Waist (low gains - weak motors)
+# Joints 15-28: Arms (low gains)
+def get_joint_gains(joint_idx):
+    if joint_idx < 12:  # Legs
+        return KP_HIGH, KD_HIGH
+    else:  # Waist and arms
+        return KP_LOW, KD_LOW
+
+
+class DataBuffer:
+    """Thread-safe data buffer"""
+    def __init__(self):
+        self.data = None
+        self.lock = threading.Lock()
+
+    def GetData(self):
+        with self.lock:
+            return self.data
+
+    def SetData(self, data):
+        with self.lock:
+            self.data = data
 
 
 class G1HardwareController:
-    """Direct hardware control for G1 robot"""
+    """Direct hardware control for G1 robot using DDS"""
     
     def __init__(self):
         global _global_controller
@@ -100,51 +118,84 @@ class G1HardwareController:
         
         # Initialize SDK
         print("Initializing SDK channel...")
-        ChannelFactoryInitialize(0, "enp3s0")  # G1's network interface
+        ChannelFactoryInitialize(0)  # 0 for real robot
         time.sleep(0.5)
         
-        # Release AI mode first using MotionSwitcherClient
-        print("Releasing AI mode...")
+        # Release any high-level mode (ai, normal, etc) to allow low-level control
+        print("Releasing high-level control mode...")
         try:
             self.motion_switcher = MotionSwitcherClient()
-            self.motion_switcher.SetTimeout(3.0)
+            self.motion_switcher.SetTimeout(5.0)
             self.motion_switcher.Init()
             
             # Check current mode
-            status, result = self.motion_switcher.CheckMode()
-            print(f"Current mode: {result}")
+            code, mode_info = self.motion_switcher.CheckMode()
+            print(f"  Current mode: {mode_info}")
             
-            # Release any existing mode
-            release_status, release_result = self.motion_switcher.ReleaseMode()
-            print(f"Release mode result: {release_result}")
-            time.sleep(0.5)
+            # Release the mode
+            release_code, _ = self.motion_switcher.ReleaseMode()
+            print(f"  Release result: code={release_code}")
+            time.sleep(1.0)  # Give time for mode to release
         except Exception as e:
-            print(f"Warning: Could not release mode: {e}")
+            print(f"  Warning: Could not release mode: {e}")
         
-        # Create low-level control
-        print("Creating low-level control...")
-        self.low_level = G1LowLevelControl()
-        self.low_level.Init()
+        # Create publisher and subscriber
+        print("Creating DDS publisher/subscriber...")
+        self.motor_cmd_pub = ChannelPublisher(kTopicLowCommand, hg_LowCmd)
+        self.motor_cmd_pub.Init()
         
-        # Get publisher for motor commands
-        self.motor_cmd_pub = self.low_level.motor_cmd_puber
-        self.motor_state_sub = self.low_level.lowstate_suber
+        self.lowstate_subscriber = ChannelSubscriber(kTopicLowState, hg_LowState)
+        self.lowstate_subscriber.Init()
+        
+        self.lowstate_buffer = DataBuffer()
+        
+        # Start subscriber thread
+        self.subscribe_thread = threading.Thread(target=self._subscribe_motor_state)
+        self.subscribe_thread.daemon = True
+        self.subscribe_thread.start()
+        
+        # Wait for first state
+        print("Waiting for robot state...")
+        timeout = 5.0
+        start = time.time()
+        while not self.lowstate_buffer.GetData():
+            if time.time() - start > timeout:
+                print("⚠️  Timeout waiting for robot state - continuing anyway")
+                break
+            time.sleep(0.1)
+        
+        # Get mode_machine from robot state (like xr_teleoperate does)
+        state = self.lowstate_buffer.GetData()
+        if state is not None:
+            self.mode_machine = state.mode_machine
+            print(f"  Robot mode_machine: {self.mode_machine}")
+        else:
+            self.mode_machine = 5  # Default for G1
+            print(f"  Using default mode_machine: {self.mode_machine}")
         
         # Store reference for emergency stop
         _global_controller = self
         
         print("✓ Hardware controller initialized")
     
+    def _subscribe_motor_state(self):
+        """Background thread to receive robot state"""
+        while True:
+            msg = self.lowstate_subscriber.Read()
+            if msg is not None:
+                self.lowstate_buffer.SetData(msg)
+            time.sleep(0.001)
+    
     def _create_motor_cmd(self):
         """Create a motor command message"""
-        msg = LowCmd_()
+        msg = unitree_hg_msg_dds__LowCmd_()
         msg.mode_pr = 0
-        msg.mode_machine = 5  # G1 mode
+        msg.mode_machine = self.mode_machine  # Use value from robot
         return msg
     
     def get_current_positions(self):
         """Get current joint positions from robot"""
-        state = self.low_level.GetMotorState()
+        state = self.lowstate_buffer.GetData()
         if state is None:
             return np.zeros(29)
         positions = np.array([state.motor_state[i].q for i in range(29)])
@@ -172,12 +223,13 @@ class G1HardwareController:
             
             msg = self._create_motor_cmd()
             for i in range(29):
+                kp, kd = get_joint_gains(i)
                 msg.motor_cmd[i].mode = 1
                 msg.motor_cmd[i].q = float(current_target[i])
                 msg.motor_cmd[i].dq = 0.0
                 msg.motor_cmd[i].tau = 0.0
-                msg.motor_cmd[i].kp = float(G1_KP[i])
-                msg.motor_cmd[i].kd = float(G1_KD[i])
+                msg.motor_cmd[i].kp = kp
+                msg.motor_cmd[i].kd = kd
             
             msg.crc = self.crc.Crc(msg)
             self.motor_cmd_pub.Write(msg)
@@ -206,12 +258,13 @@ class G1HardwareController:
             
             msg = self._create_motor_cmd()
             for i in range(29):
+                kp, kd = get_joint_gains(i)
                 msg.motor_cmd[i].mode = 1
                 msg.motor_cmd[i].q = float(current_target[i])
                 msg.motor_cmd[i].dq = 0.0
                 msg.motor_cmd[i].tau = 0.0
-                msg.motor_cmd[i].kp = float(G1_KP[i])
-                msg.motor_cmd[i].kd = float(G1_KD[i])
+                msg.motor_cmd[i].kp = kp
+                msg.motor_cmd[i].kd = kd
             
             msg.crc = self.crc.Crc(msg)
             self.motor_cmd_pub.Write(msg)
@@ -225,12 +278,13 @@ class G1HardwareController:
         msg = self._create_motor_cmd()
         
         for i in range(29):
+            kp, kd = get_joint_gains(i)
             msg.motor_cmd[i].mode = 1
             msg.motor_cmd[i].q = float(positions[i])
             msg.motor_cmd[i].dq = 0.0
             msg.motor_cmd[i].tau = 0.0
-            msg.motor_cmd[i].kp = float(G1_KP[i])
-            msg.motor_cmd[i].kd = float(G1_KD[i])
+            msg.motor_cmd[i].kp = kp
+            msg.motor_cmd[i].kd = kd
         
         msg.crc = self.crc.Crc(msg)
         self.motor_cmd_pub.Write(msg)
@@ -238,24 +292,36 @@ class G1HardwareController:
 
 def load_motion_data(motion_type):
     """Load motion data CSV file"""
+    # Map motion types to file patterns
+    motion_files = {
+        'walking': ['walk1_subject1.csv', 'walk1_subject2.csv', 'walk2_subject1.csv'],
+        'running': ['run1_subject2.csv', 'run1_subject5.csv', 'run2_subject1.csv'],
+        'jumping': ['jumps1_subject1.csv', 'jumps1_subject2.csv'],
+        'dancing': ['dance1_subject1.csv', 'dance1_subject2.csv', 'dance2_subject1.csv'],
+    }
+    
+    files = motion_files.get(motion_type, [])
+    
     # Try different possible locations
-    possible_paths = [
-        f"/home/unitree/LAFAN1_Retargeting_Dataset/g1/{motion_type}_g1.csv",
-        f"/home/unitree/g1/{motion_type}_g1.csv",
-        f"./g1/{motion_type}_g1.csv",
-        f"g1/{motion_type}_g1.csv",
+    base_paths = [
+        "/home/unitree/LAFAN1_Retargeting_Dataset/g1/",
+        "/home/unitree/g1/",
+        "./g1/",
+        "g1/",
     ]
     
-    for path in possible_paths:
-        if os.path.exists(path):
-            print(f"Loading motion data from: {path}")
-            data = np.loadtxt(path, delimiter=',', skiprows=1)
-            print(f"  Shape: {data.shape}")
-            print(f"  Frames: {len(data)}")
-            return data
+    for base_path in base_paths:
+        for filename in files:
+            path = os.path.join(base_path, filename)
+            if os.path.exists(path):
+                print(f"Loading motion data from: {path}")
+                data = np.loadtxt(path, delimiter=',', skiprows=1)
+                print(f"  Shape: {data.shape}")
+                print(f"  Frames: {len(data)}")
+                return data
     
     print(f"✗ Could not find motion data for '{motion_type}'")
-    print("  Tried paths:", possible_paths)
+    print("  Tried paths:", base_paths)
     return None
 
 
