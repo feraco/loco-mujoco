@@ -87,7 +87,16 @@ class RerunURDF():
                    static=True)
     
     def update(self, configuration = None):
-        self.robot.framesForwardKinematics(self.Tpose if configuration is None else configuration)
+        config = self.Tpose if configuration is None else configuration
+        
+        # Keep the robot centered by zeroing out XY translation
+        # This prevents the view from following the robot's movement
+        centered_config = config.copy()
+        centered_config[0] = 0.0  # Zero X translation
+        centered_config[1] = 0.0  # Zero Y translation
+        # Keep Z (height) as is: centered_config[2] stays unchanged
+        
+        self.robot.framesForwardKinematics(centered_config)
         for visual in self.robot.visual_model.geometryObjects:
             frame_name = visual.name[:-2]
             frame_id = self.robot.model.getFrameId(frame_name)
@@ -111,6 +120,26 @@ if __name__ == "__main__":
         spawn=True
     )
     rr.log('', rr.ViewCoordinates.RIGHT_HAND_Z_UP, static=True)
+    
+    # Set up a fixed camera view to prevent zooming
+    rr.log(
+        "world/camera",
+        rr.Pinhole(
+            resolution=[1920, 1080],
+            focal_length=1000,
+        ),
+        static=True,
+    )
+    
+    # Set camera position to look at the robot from a good angle
+    rr.log(
+        "world/camera",
+        rr.Transform3D(
+            translation=[3.0, 3.0, 1.5],  # Position camera 3m away, slightly elevated
+            rotation=rr.Quaternion(xyzw=[0, 0, 0, 1]),  # Look at origin
+        ),
+        static=True,
+    )
 
     file_name = args.file_name
     robot_type = args.robot_type
