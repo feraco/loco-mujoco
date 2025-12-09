@@ -56,6 +56,22 @@ scp -r LAFAN1_Retargeting_Dataset/g1/ unitree@192.168.30.129:~/LAFAN1_Retargetin
 ```
 
 ### 4. Run Motion Test
+
+**NEW: With Balance Control (Recommended for High Speeds)**
+```bash
+# On Jetson - download the balanced version
+wget https://raw.githubusercontent.com/feraco/loco-mujoco/master/LAFAN1_Retargeting_Dataset/quick_hardware_test_jetson_balanced.py
+
+# Dance at 50% speed with balance stabilization
+python3 ~/quick_hardware_test_jetson_balanced.py dancing --speed 0.5
+
+# Dance at 100% speed with balance control (still risky!)
+python3 ~/quick_hardware_test_jetson_balanced.py dancing --speed 1.0
+
+# See BALANCE_ISSUES_AND_SOLUTIONS.md for full details
+```
+
+**Original Script (Conservative Speeds)**
 ```bash
 # On Jetson
 python3 ~/quick_hardware_test_jetson.py walking    # Safest - 10% speed
@@ -65,6 +81,34 @@ python3 ~/quick_hardware_test_jetson.py dancing    # 2% speed - most dynamic
 ```
 
 ## Troubleshooting
+
+### Balance Issues at High Speed
+
+**Problem**: Robot loses balance when running dance datasets at 100% speed.
+
+**Cause**: The retargeted motions only consider kinematic constraints, not dynamics. Dance motions have rapid weight shifts and high accelerations that violate dynamic stability at full speed.
+
+**Solutions**:
+1. **Use the balanced controller** (recommended):
+   ```bash
+   python3 quick_hardware_test_jetson_balanced.py dancing --speed 0.5
+   ```
+   - Adds real-time IMU-based balance corrections
+   - Monitors tilt and angular velocity
+   - Emergency stops if unstable
+   - See `BALANCE_ISSUES_AND_SOLUTIONS.md` for details
+
+2. **Reduce playback speed**:
+   - Start at 20-30% speed
+   - Gradually increase by 10% increments
+   - Monitor robot stability carefully
+
+3. **Use safety equipment**:
+   - Overhead suspension/harness
+   - Soft landing surface
+   - Clear testing area
+
+**Read the full analysis**: `BALANCE_ISSUES_AND_SOLUTIONS.md`
 
 ### Error: "No module named 'unitree_sdk2py.g1.low_level'"
 This means you have an **old version** of the script. The correct imports are:
