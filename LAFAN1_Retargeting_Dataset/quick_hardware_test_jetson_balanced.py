@@ -226,7 +226,7 @@ class BalanceController:
         Check if robot is in dangerous state
         Returns: (is_stable, warning_message)
         """
-        if low_state is None:
+        if not self.enable or low_state is None:
             return True, None
         
         imu = low_state.imu_state
