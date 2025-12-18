@@ -45,6 +45,7 @@ class RerunURDF():
         
         self.link2mesh = self.get_link2mesh()
         self.load_visual_mesh()
+        self.joint_names = self._get_joint_names()
         self.update()
     
     def get_link2mesh(self):
@@ -86,7 +87,30 @@ class RerunURDF():
                    ),
                    static=True)
     
-    def update(self, configuration = None):
+    def _get_joint_names(self):
+        """Get list of joint names excluding the root joint"""
+        joint_names = []
+        for i in range(1, self.robot.model.njoints):  # Skip universe joint at 0
+            joint_name = self.robot.model.names[i]
+            joint_names.append(joint_name)
+        return joint_names
+    
+    def _log_joint_data(self, configuration):
+        """Log joint angle data to Rerun for time series visualization"""
+        # Skip the first 7 values (base position and quaternion)
+        joint_positions = configuration[7:]
+        
+        # Log base position separately
+        rr.log("joint_data/base/position_x", rr.Scalar(configuration[0]))
+        rr.log("joint_data/base/position_y", rr.Scalar(configuration[1]))
+        rr.log("joint_data/base/position_z", rr.Scalar(configuration[2]))
+        
+        # Log joint angles
+        for i, (joint_name, angle) in enumerate(zip(self.joint_names[1:], joint_positions)):
+            if i < len(joint_positions):
+                rr.log(f"joint_data/joints/{joint_name}", rr.Scalar(angle))
+    
+    def update(self, configuration = None, log_joints = False):
         config = self.Tpose if configuration is None else configuration
         
         # Keep the robot centered by zeroing out XY translation
@@ -107,13 +131,30 @@ class RerunURDF():
                    rr.Transform3D(translation=joint_tf.translation,
                                   mat3x3=joint_tf.rotation,
                                   axis_length=0.01))
+        
+        # Log joint angles if requested
+        if log_joints:
+            self._log_joint_data(config)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--file_name', type=str, help="File name", default='dance1_subject2')
     parser.add_argument('--robot_type', type=str, help="Robot type", default='g1')
+    parser.add_argument('--show_joints', action='store_true', help="Show joint angle visualizations")
+    parser.add_argument('--camera_view', type=str, default='front', 
+                        choices=['front', 'side', 'diagonal', 'top'],
+                        help="Camera view position: front, side, diagonal, or top")
     args = parser.parse_args()
+    
+    # Define camera positions based on view choice
+    camera_positions = {
+        'front': [2.5, 0.0, 1.0],      # Directly in front, eye level
+        'side': [0.0, 2.5, 1.0],        # From the side
+        'diagonal': [2.0, 2.0, 1.5],    # Diagonal view (original)
+        'top': [0.0, 0.0, 4.0]          # Top-down view
+    }
+    camera_position = camera_positions[args.camera_view]
 
     rr.init(
         'Reviz', 
@@ -131,11 +172,11 @@ if __name__ == "__main__":
         static=True,
     )
     
-    # Set camera position to look at the robot from a good angle
+    # Set camera position based on selected view
     rr.log(
         "world/camera",
         rr.Transform3D(
-            translation=[3.0, 3.0, 1.5],  # Position camera 3m away, slightly elevated
+            translation=camera_position,
             rotation=rr.Quaternion(xyzw=[0, 0, 0, 1]),  # Look at origin
         ),
         static=True,
@@ -147,8 +188,15 @@ if __name__ == "__main__":
     data = np.genfromtxt(csv_files, delimiter=',')
 
     rerun_urdf = RerunURDF(robot_type)
+    
+    print(f"\nVisualizing {file_name} for {robot_type}")
+    print(f"Total frames: {data.shape[0]}")
+    if args.show_joints:
+        print("Joint data visualization: ENABLED")
+        print("Check the 'joint_data' section in Rerun for time series plots")
+    
     for frame_nr in range(data.shape[0]):
         rr.set_time_sequence('frame_nr', frame_nr)
         configuration = data[frame_nr, :]
-        rerun_urdf.update(configuration)
+        rerun_urdf.update(configuration, log_joints=args.show_joints)
         time.sleep(0.03)
